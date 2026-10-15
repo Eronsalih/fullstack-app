@@ -1,0 +1,71 @@
+# PRODUCTION file. Runs on the Azure VM (the pipeline copies it there as docker-compose.yml).
+# It never builds anything: it only pulls the images that CI already pushed to GHCR.
+#
+# Required variables (the pipeline writes them to ~/app/.env on the VM):
+#   IMAGE_PREFIX, IMAGE_TAG, MONGO_USER, MONGO_PASSWORD
+
+name: fullstack-app
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  mongo:
+    image: mongo:7
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:?MONGO_USER is required}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD is required}
+    volumes:
+      - mongo_data:/data/db
+    # No "ports": the database is reachable only from other containers, never from the internet
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    logging: *default-logging
+
+  backend:
+    image: ${IMAGE_PREFIX:?IMAGE_PREFIX is required}-backend:${IMAGE_TAG:-latest}
+    restart: always
+    environment:
+      MONGO_HOST: mongo
+      MONGO_PORT: "27017"
+      MONGO_USER: ${MONGO_USER}
+      MONGO_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_DB: ${MONGO_DB:-appdb}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+    expose:
+      - "8000" # visible to other containers only (nginx), not published to the host
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+
+  frontend:
+    image: ${IMAGE_PREFIX}-frontend:${IMAGE_TAG:-latest}
+    restart: always
+    ports:
+      - "80:80" # the only public entry point: static site + /api proxy
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging: *default-logging
+
+volumes:
+  mongo_data:

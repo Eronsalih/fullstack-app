@@ -1,0 +1,13 @@
+#cloud-config
+# Runs once, the first time the Azure VM boots: installs Docker + the Compose plugin.
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable --now docker
+  - usermod -aG docker azureuser
+  - mkdir -p /home/azureuser/app
+  - chown azureuser:azureuser /home/azureuser/app
