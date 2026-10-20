@@ -1,0 +1,79 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+      IMAGE_TAG: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        run: |
+          export IMAGE_PREFIX="${IMAGE_PREFIX,,}"   # GHCR needs lowercase
+          docker compose build backend frontend
+          docker compose push backend frontend
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+      IMAGE_TAG: ${{ github.sha }}
+      VM_HOST: ${{ secrets.AZURE_VM_HOST }}
+      VM_USER: ${{ secrets.AZURE_VM_USER }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.AZURE_VM_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          cat > ~/.ssh/config <<EOF
+          Host server
+            HostName ${VM_HOST}
+            User ${VM_USER}
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking accept-new
+          EOF
+
+      - name: Copy compose file and .env to the server
+        run: |
+          ssh server "mkdir -p ~/app"
+          umask 077
+          {
+            echo "IMAGE_PREFIX=${IMAGE_PREFIX,,}"
+            echo "IMAGE_TAG=${IMAGE_TAG}"
+            echo "MONGO_USER=${{ secrets.MONGO_USER }}"
+            echo "MONGO_PASSWORD=${{ secrets.MONGO_PASSWORD }}"
+            echo "MONGO_DB=appdb"
+          } > .env
+          scp docker-compose.prod.yml server:~/app/docker-compose.yml
+          scp .env server:~/app/.env
+
+      - name: Pull images and restart containers
+        run: |
+          printf '%s' "${{ secrets.GITHUB_TOKEN }}" | ssh server "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+          ssh server "cd ~/app && docker compose pull && docker compose up -d --remove-orphans && docker image prune -f"
