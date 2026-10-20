@@ -15,9 +15,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ---------------------------------------------------------------
-  # Job 1: build both images with Docker Compose and push them to GHCR
-  # ---------------------------------------------------------------
+ 
   build-and-push:
     name: Build & push images to GHCR
     runs-on: ubuntu-latest
@@ -59,9 +57,7 @@ jobs:
             docker push "${IMAGE_PREFIX}-${service}:latest"
           done
 
-  # ---------------------------------------------------------------
-  # Job 2: deploy the new images to the Azure VM over SSH
-  # ---------------------------------------------------------------
+
   deploy:
     name: Deploy to Azure VM
     needs: build-and-push
@@ -91,6 +87,14 @@ jobs:
             ServerAliveInterval 30
           EOF
           chmod 600 ~/.ssh/config
+
+      - name: Check that Docker is ready on the VM
+        run: |
+          if ! ssh azure-vm 'docker info >/dev/null 2>&1'; then
+            echo "::error::Docker is not usable on the VM. Install Docker on the VM and add the user to the docker group (see README), then re-run the workflow."
+            exit 1
+          fi
+          ssh azure-vm 'docker --version && docker compose version'
 
       - name: Copy compose file and .env to the VM
         env:

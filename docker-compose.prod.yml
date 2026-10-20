@@ -61,7 +61,7 @@ services:
     image: ${IMAGE_PREFIX}-frontend:${IMAGE_TAG:-latest}
     restart: always
     ports:
-      - "80:80" # the only public entry point: static site + /api proxy
+      - "127.0.0.1:8080:80"
     depends_on:
       backend:
         condition: service_healthy

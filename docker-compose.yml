@@ -63,7 +63,7 @@ services:
     image: ${IMAGE_PREFIX:-ghcr.io/eronsalih/fullstack-app}-frontend:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
-      - "3000:80" # App: http://localhost:3000
+      - "127.0.0.1:8080:80" # App: http://localhost:3000
     depends_on:
       backend:
         condition: service_healthy
